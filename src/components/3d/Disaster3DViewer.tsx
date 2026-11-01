@@ -13,6 +13,7 @@ export const Disaster3DViewer: React.FC<Disaster3DViewerProps> = ({ hotspot }) =
   const [showWireframe, setShowWireframe] = useState<boolean>(true);
   const [waterLevel, setWaterLevel] = useState<number>(1.2);
   const [verticalExaggeration, setVerticalExaggeration] = useState<number>(2.5);
+  const [webglSupported, setWebglSupported] = useState<boolean>(true);
 
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -73,10 +74,17 @@ export const Disaster3DViewer: React.FC<Disaster3DViewerProps> = ({ hotspot }) =
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    rendererRef.current = renderer;
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width || 600, height || 400);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      rendererRef.current = renderer;
+    } catch (e) {
+      console.warn('WebGL is not available in Disaster3DViewer:', e);
+      setWebglSupported(false);
+      return;
+    }
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -271,15 +279,28 @@ export const Disaster3DViewer: React.FC<Disaster3DViewerProps> = ({ hotspot }) =
           </div>
         </div>
 
-        {/* 3D Viewport */}
-        <div
-          ref={mountRef}
-          className="w-full h-[400px] rounded-xl overflow-hidden bg-slate-950 border border-slate-800 relative cursor-grab active:cursor-grabbing"
-        >
-          <div className="absolute top-3 left-3 glass-panel px-2.5 py-1.5 rounded text-[11px] font-mono text-slate-300 pointer-events-none">
-            DRAG TO ROTATE 3D PERSPECTIVE
+        {/* 3D Viewport or 2D Topographic Contour Fallback */}
+        {webglSupported ? (
+          <div
+            ref={mountRef}
+            className="w-full h-[400px] rounded-xl overflow-hidden bg-slate-950 border border-slate-800 relative cursor-grab active:cursor-grabbing"
+          >
+            <div className="absolute top-3 left-3 glass-panel px-2.5 py-1.5 rounded text-[11px] font-mono text-slate-300 pointer-events-none">
+              DRAG TO ROTATE 3D PERSPECTIVE
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="w-full h-[400px] rounded-xl overflow-hidden bg-slate-950 border border-slate-800 relative flex flex-col items-center justify-center p-6 text-center">
+            <Mountain className="w-10 h-10 text-cyan-400 mb-2 opacity-80" />
+            <div className="text-white font-chakra text-lg font-bold">Topographic Radar Inundation Model</div>
+            <div className="text-slate-400 text-xs font-mono max-w-sm mt-1">
+              DEM elevation baseline: <strong className="text-cyan-300">{hotspot.elevationDeltaMeters}m</strong> vertical surface displacement.
+            </div>
+            <div className="mt-4 px-4 py-2 rounded-lg bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-mono text-xs">
+              Measured InSAR Coherence: {(hotspot.coherenceScore * 100).toFixed(0)}% • Mode: {viewState.toUpperCase()}
+            </div>
+          </div>
+        )}
 
         {/* Bottom Toggles */}
         <div className="flex items-center justify-between mt-3 text-xs font-mono text-slate-300">

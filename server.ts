@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
@@ -10,7 +11,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+// Port 3000 is required by the environment specification; Nginx on 8080 proxies to 3000
+const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -388,18 +390,28 @@ app.get('/api/nisar/status', (_req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  const distDir = path.join(__dirname, 'dist');
+  const indexHtmlPath = path.join(distDir, 'index.html');
+  const hasBuild = fs.existsSync(indexHtmlPath);
+
+  // In production mode, or if build output is present (and not explicitly development mode), serve compiled app
+  if (process.env.NODE_ENV === 'production' || (hasBuild && process.env.NODE_ENV !== 'development')) {
+    console.log(`[EarthPulse] Production mode active. Serving static bundle from ${distDir}`);
+    app.use(express.static(distDir, { maxAge: '1h' }));
+    app.get('*', (req, res) => {
+      if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'Endpoint not found' });
+      }
+      res.sendFile(indexHtmlPath);
+    });
+  } else {
+    console.log('[EarthPulse] Mounting Vite dev server middleware for development...');
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {

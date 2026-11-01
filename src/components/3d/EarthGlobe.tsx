@@ -33,6 +33,7 @@ export const EarthGlobe: React.FC<EarthGlobeProps> = ({
   const [showOrbit, setShowOrbit] = useState<boolean>(true);
   const [isAutoRotating, setIsAutoRotating] = useState<boolean>(true);
   const [cameraZoomLevel, setCameraZoomLevel] = useState<number>(2.4);
+  const [webglSupported, setWebglSupported] = useState<boolean>(true);
 
   // References to three objects for interaction
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -224,13 +225,20 @@ export const EarthGlobe: React.FC<EarthGlobeProps> = ({
     camera.position.set(0, 0.4, cameraZoomLevel);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
-    rendererRef.current = renderer;
+    // Renderer with WebGL safety fallback
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width || 800, height || 600);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.2;
+      rendererRef.current = renderer;
+    } catch (glError) {
+      console.warn('WebGL is unavailable or restricted; activating 2D planetary radar grid view:', glError);
+      setWebglSupported(false);
+      return;
+    }
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -343,12 +351,15 @@ export const EarthGlobe: React.FC<EarthGlobeProps> = ({
 
     // Animation Loop
     let animationFrameId: number;
-    let clock = new THREE.Clock();
+    let lastTime = performance.now();
+    const startTime = performance.now();
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
-      const delta = clock.getDelta();
-      const time = clock.getElapsedTime();
+      const now = performance.now();
+      const delta = Math.min((now - lastTime) / 1000, 0.1);
+      const time = (now - startTime) / 1000;
+      lastTime = now;
 
       // Auto rotation
       if (isAutoRotating && !targetRotationRef.current && globeGroupRef.current) {
@@ -596,88 +607,127 @@ export const EarthGlobe: React.FC<EarthGlobeProps> = ({
 
   return (
     <div className="relative w-full h-[620px] lg:h-[720px] rounded-2xl overflow-hidden border border-cyan-500/20 bg-slate-950/70 backdrop-blur-xl shadow-2xl">
-      {/* 3D Canvas Container */}
-      <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
-
-      {/* Top Left: Mission HUD Readout */}
-      <div className="absolute top-4 left-4 z-20 pointer-events-none">
-        <div className="glass-panel px-3.5 py-2.5 rounded-lg border border-cyan-500/30 text-xs font-mono">
-          <div className="flex items-center gap-2 text-cyan-400 font-semibold mb-1">
-            <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
-            <span>NISAR ORBITAL TRACK: 747 KM SSO</span>
-          </div>
-          <div className="text-slate-400 text-[11px] flex gap-4">
-            <span>INCLINATION: <strong className="text-white">98.4°</strong></span>
-            <span>REPEAT: <strong className="text-white">12 DAYS</strong></span>
-            <span>SWATH: <strong className="text-white">242 KM</strong></span>
+      {/* 3D Canvas Container or 2D Interactive Radar Grid Fallback */}
+      {webglSupported ? (
+        <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      ) : (
+        <div className="w-full h-full flex flex-col items-center justify-center p-8 bg-slate-950 text-center relative overflow-hidden">
+          {/* Subtle Radar Scan Background */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-950/40 via-slate-950 to-slate-950 pointer-events-none" />
+          <div className="relative z-10 max-w-2xl space-y-4">
+            <span className="px-3 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider uppercase bg-cyan-950 border border-cyan-500/40 text-cyan-300">
+              PLANETARY RADAR 2D SYNTHETIC VIEW
+            </span>
+            <h3 className="font-chakra text-2xl font-bold text-white">
+              Global NISAR Radar Observation Network
+            </h3>
+            <p className="text-slate-300 text-xs sm:text-sm font-mono max-w-lg mx-auto">
+              Hardware WebGL acceleration is operating in software mode. Select any planetary observation target below to inspect radar backscatter analytics.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-3 text-left">
+              {filteredHotspots.map((hotspot) => (
+                <button
+                  key={hotspot.id}
+                  onClick={() => onSelectHotspot(hotspot)}
+                  className={`p-3 rounded-xl border text-xs font-mono transition-all text-left cursor-pointer ${
+                    selectedHotspotId === hotspot.id
+                      ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-950'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-cyan-500/50 hover:text-white'
+                  }`}
+                >
+                  <div className="font-bold text-white truncate">{hotspot.name}</div>
+                  <div className="text-[10px] text-cyan-400 uppercase mt-0.5">{hotspot.category}</div>
+                  <div className="text-[10px] text-slate-400 mt-1 flex justify-between">
+                    <span>{hotspot.country}</span>
+                    <span className={hotspot.deltaDb < 0 ? 'text-cyan-300' : 'text-amber-300'}>
+                      {hotspot.deltaDb > 0 ? `+${hotspot.deltaDb}` : hotspot.deltaDb} dB
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Top Right: Map Display Modes & Satellite Toggles */}
-      <div className="absolute top-4 right-4 z-20 flex flex-wrap gap-2">
-        <div className="glass-panel p-1 rounded-lg border border-cyan-500/30 flex gap-1 text-xs font-mono">
-          <button
-            onClick={() => setMapMode('radar')}
-            className={`px-2.5 py-1 rounded transition-colors ${
-              mapMode === 'radar'
-                ? 'bg-cyan-500/30 text-cyan-300 font-bold border border-cyan-400/40'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            RADAR SAR
-          </button>
-          <button
-            onClick={() => setMapMode('satellite')}
-            className={`px-2.5 py-1 rounded transition-colors ${
-              mapMode === 'satellite'
-                ? 'bg-emerald-500/30 text-emerald-300 font-bold border border-emerald-400/40'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            SATELLITE
-          </button>
-          <button
-            onClick={() => setMapMode('dark')}
-            className={`px-2.5 py-1 rounded transition-colors ${
-              mapMode === 'dark'
-                ? 'bg-indigo-500/30 text-indigo-300 font-bold border border-indigo-400/40'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            DEEP DARK
-          </button>
+      {/* Top Header Cluster: Mission HUD & Display Mode Toggles */}
+      <div className="absolute top-3 left-3 right-3 z-20 flex flex-col sm:flex-row sm:items-center justify-between gap-2 pointer-events-none">
+        <div className="glass-panel px-3 py-1.5 rounded-lg border border-cyan-500/30 text-xs font-mono pointer-events-auto shrink-0 shadow-lg bg-slate-950/80 backdrop-blur-md">
+          <div className="flex items-center gap-2 text-cyan-400 font-semibold text-[11px]">
+            <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-400 shrink-0" />
+            <span>NISAR 747 KM SSO</span>
+            <span className="text-slate-500">•</span>
+            <span className="text-slate-300">98.4° INC</span>
+            <span className="text-slate-500 hidden md:inline">•</span>
+            <span className="text-slate-300 hidden md:inline">242 KM SWATH</span>
+          </div>
         </div>
 
-        <button
-          onClick={() => {
-            setShowOrbit(!showOrbit);
-            if (orbitLineRef.current) orbitLineRef.current.visible = !showOrbit;
-            if (satelliteMeshRef.current) satelliteMeshRef.current.visible = !showOrbit;
-          }}
-          className={`glass-panel px-3 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition-colors ${
-            showOrbit
-              ? 'border-cyan-400/50 text-cyan-300 bg-cyan-950/60'
-              : 'border-slate-700 text-slate-400 hover:text-white'
-          }`}
-          title="Toggle NISAR Satellite Orbit Track"
-        >
-          <Satellite className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">NISAR ORBIT</span>
-        </button>
+        {/* Right: Map Display Modes & Orbit Toggles */}
+        <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+          <div className="glass-panel p-1 rounded-lg border border-cyan-500/30 flex gap-1 text-[11px] font-mono bg-slate-950/80 backdrop-blur-md">
+            <button
+              onClick={() => setMapMode('radar')}
+              className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                mapMode === 'radar'
+                  ? 'bg-cyan-500/30 text-cyan-300 font-bold border border-cyan-400/40'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              RADAR SAR
+            </button>
+            <button
+              onClick={() => setMapMode('satellite')}
+              className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                mapMode === 'satellite'
+                  ? 'bg-emerald-500/30 text-emerald-300 font-bold border border-emerald-400/40'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              SATELLITE
+            </button>
+            <button
+              onClick={() => setMapMode('dark')}
+              className={`px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                mapMode === 'dark'
+                  ? 'bg-indigo-500/30 text-indigo-300 font-bold border border-indigo-400/40'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              DEEP DARK
+            </button>
+          </div>
 
-        <button
-          onClick={() => setIsAutoRotating(!isAutoRotating)}
-          className={`glass-panel px-3 py-1 rounded-lg border text-xs font-mono flex items-center gap-1.5 transition-colors ${
-            isAutoRotating
-              ? 'border-cyan-400/50 text-cyan-300 bg-cyan-950/60'
-              : 'border-slate-700 text-slate-400 hover:text-white'
-          }`}
-          title="Toggle Auto-Rotation"
-        >
-          <RotateCcw className={`w-3.5 h-3.5 ${isAutoRotating ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">ROTATE</span>
-        </button>
+          <button
+            onClick={() => {
+              setShowOrbit(!showOrbit);
+              if (orbitLineRef.current) orbitLineRef.current.visible = !showOrbit;
+              if (satelliteMeshRef.current) satelliteMeshRef.current.visible = !showOrbit;
+            }}
+            className={`glass-panel px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-colors cursor-pointer bg-slate-950/80 backdrop-blur-md ${
+              showOrbit
+                ? 'border-cyan-400/50 text-cyan-300 bg-cyan-950/60'
+                : 'border-slate-700 text-slate-400 hover:text-white'
+            }`}
+            title="Toggle NISAR Satellite Orbit Track"
+          >
+            <Satellite className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">NISAR ORBIT</span>
+          </button>
+
+          <button
+            onClick={() => setIsAutoRotating(!isAutoRotating)}
+            className={`glass-panel px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-colors cursor-pointer bg-slate-950/80 backdrop-blur-md ${
+              isAutoRotating
+                ? 'border-cyan-400/50 text-cyan-300 bg-cyan-950/60'
+                : 'border-slate-700 text-slate-400 hover:text-white'
+            }`}
+            title="Toggle Auto-Rotation"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isAutoRotating ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">ROTATE</span>
+          </button>
+        </div>
       </div>
 
       {/* Floating Hovered Hotspot Tooltip */}
