@@ -1,0 +1,6 @@
+{
+  "name": "EarthPulse – The Living Planet",
+  "description": "Interactive Global Earth Surface Change Monitoring Platform Powered by NASA-ISRO NISAR Satellite Radar Observations for the NASA Space Apps Challenge.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
